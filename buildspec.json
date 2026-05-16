@@ -5,7 +5,7 @@
             "baseUrl": "https://github.com/obsproject/obs-studio/archive/refs/tags",
             "label": "OBS sources",
             "hashes": {
-                "macos": "39751f067bacc13d44b116c5138491b5f1391f91516d3d590d874edd21292291",
+                "macos": "625ee6a29c3cf93177436094b8a16254c3eb21162356662b9a62c122aabd0a4b",
                 "windows-x64": "5e17f2e99213af77ee15c047755ee3e3e88b78e5eee17351c113d79671ffb98b"
             }
         },
@@ -31,10 +31,15 @@
             }
         }
     },
+    "platformConfig": {
+        "macos": {
+            "bundleId": "com.hack1exe.obs-midikeyboard"
+        }
+    },
     "name": "obs-midikeyboard",
     "displayName": "MIDI Piano Keyboard",
     "version": "1.0.0",
-    "author": "obs-midikeyboard",
-    "website": "",
+    "author": "hack1exe",
+    "website": "https://github.com/hack1exe/obs-midikeyboard",
     "email": ""
 }
