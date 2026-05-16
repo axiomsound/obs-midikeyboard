@@ -28,10 +28,23 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     extern/rtmidi
 )
 
-target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE winmm)
+if(WIN32)
+    target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE winmm)
+    target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE __WINDOWS_MM__)
+endif()
+
+if(APPLE)
+    target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE "-framework CoreMIDI" "-framework CoreFoundation")
+    target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE __MACOSX_CORE__)
+endif()
+
+if(UNIX AND NOT APPLE)
+    find_package(ALSA REQUIRED)
+    target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE ALSA::ALSA)
+    target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE __LINUX_ALSA__)
+endif()
 
 target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
-    __WINDOWS_MM__
     _CRT_SECURE_NO_WARNINGS
 )
 
