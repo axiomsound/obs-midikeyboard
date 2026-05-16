@@ -12,11 +12,6 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Fix script permissions
-      if: runner.os != 'Windows'
-      shell: bash
-      run: chmod +x "${GITHUB_WORKSPACE}/build-aux/run-gersemi"
-
     - name: Check Runner Operating System 🏃‍♂️
       if: runner.os == 'Windows'
       shell: bash

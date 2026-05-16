@@ -67,44 +67,6 @@ function Package {
     }
     Compress-Archive -Force @CompressArgs
     Log-Group
-
-    # Build Inno Setup installer if available
-    $RemoveArgs = @{
-        ErrorAction = 'SilentlyContinue'
-        Path = @(
-            "${ProjectRoot}/release/${ProductName}-*-windows-*.exe"
-        )
-    }
-    Remove-Item @RemoveArgs
-
-    $isccPath = (Get-Command "iscc" -ErrorAction SilentlyContinue).Source
-    if (-not $isccPath) {
-        $isccPath = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
-        if (-not (Test-Path $isccPath)) {
-            $isccPath = "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
-            if (-not (Test-Path $isccPath)) {
-                $isccPath = $null
-            }
-        }
-    }
-
-    if ($isccPath) {
-        Log-Group "Building Inno Setup installer..."
-        $IssScript = "${ProjectRoot}/installer/setup.iss"
-        if (Test-Path $IssScript) {
-            Invoke-External cmd /c "`"$isccPath`" /dBuildConfig=$Configuration `"$IssScript`"" 2>&1
-
-            $Installer = "${ProjectRoot}/build_x64/installer/${OutputName}.exe"
-            if (Test-Path $Installer) {
-                Copy-Item $Installer "${ProjectRoot}/release/${OutputName}.exe" -Force
-                Log-Information "Installer: ${OutputName}.exe"
-            }
-        }
-        Log-Group
-    }
-    else {
-        Log-Information "Inno Setup not found, skipping installer"
-    }
 }
 
 Package
