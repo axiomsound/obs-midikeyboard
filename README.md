@@ -17,13 +17,13 @@ An OBS Studio plugin that visualizes MIDI keyboard input as a real-time piano ov
 ## Installation
 
 ### Windows
-Download the `.exe` installer from [Releases](https://github.com/hack1exe/obs-midikeyboard/releases) and run it. The installer will detect your OBS Studio installation path.
+Download the `.exe` installer from [Releases](https://github.com/axiomsound/obs-midikeyboard/releases) and run it. The installer will detect your OBS Studio installation path.
 
 ### macOS
-Download the `.pkg` installer from [Releases](https://github.com/hack1exe/obs-midikeyboard/releases).
+Download the `.pkg` installer from [Releases](https://github.com/axiomsound/obs-midikeyboard/releases).
 
 ### Linux
-Download the `.deb` or `.tar.xz` package from [Releases](https://github.com/hack1exe/obs-midikeyboard/releases).
+Download the `.deb` or `.tar.xz` package from [Releases](https://github.com/axiomsound/obs-midikeyboard/releases).
 
 ## Usage
 
