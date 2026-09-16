@@ -17,6 +17,15 @@ static std::string str_tolower(const std::string &s)
 	return result;
 }
 
+static bool port_name_matches(const std::string &port_name, const std::string &target_name,
+			       const std::string &target_name_lower)
+{
+	std::string port_lower = str_tolower(port_name);
+	return port_lower == target_name_lower || port_name == target_name ||
+	       port_lower.find(target_name_lower) != std::string::npos ||
+	       target_name_lower.find(port_lower) != std::string::npos;
+}
+
 MidiInput::MidiInput(const std::string &device_name)
 	: device_name_(device_name),
 	  device_name_lower_(str_tolower(device_name))
@@ -111,6 +120,22 @@ bool MidiInput::is_open() const
 	}
 }
 
+bool MidiInput::device_still_present() const
+{
+	try {
+		RtMidiIn probe(RtMidi::UNSPECIFIED, "OBS MIDI Keyboard Liveness");
+		unsigned int port_count = probe.getPortCount();
+		for (unsigned int i = 0; i < port_count; ++i) {
+			if (port_name_matches(probe.getPortName(i), device_name_, device_name_lower_))
+				return true;
+		}
+		return false;
+	} catch (const RtMidiError &) {
+		// Enumeration itself failed - don't treat that as proof the device is gone.
+		return true;
+	}
+}
+
 void MidiInput::check_reconnect()
 {
 	auto now = std::chrono::steady_clock::now();
@@ -121,8 +146,24 @@ void MidiInput::check_reconnect()
 
 	last_reconnect_check_ = now;
 
-	if (is_open())
-		return;
+	if (is_open()) {
+		// RtMidi's WinMM backend (midiInputCallback in RtMidi.cpp) only reacts to
+		// MIM_DATA/MIM_LONGDATA/MIM_LONGERROR - it never observes MIM_CLOSE, so
+		// isPortOpen()/is_open() keeps reporting true forever after the device is
+		// physically unplugged. Periodically re-enumerate (rate-limited separately,
+		// every ~3s) and confirm our port is still present; if not, force-close so
+		// the reconnect attempt below can pick the device back up once it returns.
+		if (now - last_liveness_check_ < std::chrono::seconds(3))
+			return;
+		last_liveness_check_ = now;
+
+		if (device_still_present())
+			return;
+
+		blog(LOG_INFO, "[MIDI Keyboard] Device '%s' no longer present - closing stale handle",
+		     device_name_.c_str());
+		close();
+	}
 
 	// Try to reconnect
 	blog(LOG_INFO, "[MIDI Keyboard] Attempting reconnect to '%s'...", device_name_.c_str());
@@ -131,14 +172,10 @@ void MidiInput::check_reconnect()
 		auto *midi_in = new RtMidiIn(RtMidi::UNSPECIFIED, "OBS MIDI Keyboard");
 		unsigned int port_count = midi_in->getPortCount();
 
-		std::string target = str_tolower(device_name_);
 		for (unsigned int i = 0; i < port_count; ++i) {
 			std::string port_name = midi_in->getPortName(i);
-			std::string port_lower = str_tolower(port_name);
 
-			if (port_lower == target || port_name == device_name_ ||
-			    port_lower.find(target) != std::string::npos ||
-			    target.find(port_lower) != std::string::npos) {
+			if (port_name_matches(port_name, device_name_, device_name_lower_)) {
 				midi_in->openPort(i, "OBS MIDI Keyboard");
 				midi_in->setCallback(&MidiInput::midi_callback, this);
 				midi_in->ignoreTypes(true, true, true);
