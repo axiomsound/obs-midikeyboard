@@ -24,6 +24,11 @@ public:
 private:
 	static void midi_callback(double time, std::vector<unsigned char> *msg, void *user_data);
 	void handle_message(const std::vector<unsigned char> &msg);
+	// Re-enumerates ports and checks whether device_name_ is still among them. RtMidi's
+	// WinMM backend never surfaces MIM_CLOSE to isPortOpen()/connected_, so on physical
+	// unplug is_open() keeps reporting true forever - this is the only reliable way to
+	// notice the device is gone. Rate-limited via last_liveness_check_.
+	bool device_still_present() const;
 
 	std::string device_name_;
 	std::string device_name_lower_;
@@ -34,6 +39,7 @@ private:
 	std::map<int, uint8_t> active_notes_;
 	std::chrono::steady_clock::time_point last_message_time_;
 	std::chrono::steady_clock::time_point last_reconnect_check_;
+	std::chrono::steady_clock::time_point last_liveness_check_;
 	bool was_ever_open_ = false;
 	bool open_attempted_ = false;
 	std::atomic<bool> running_{true};
