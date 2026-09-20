@@ -18,7 +18,7 @@ static std::string str_tolower(const std::string &s)
 }
 
 static bool port_name_matches(const std::string &port_name, const std::string &target_name,
-			    const std::string &target_name_lower)
+			      const std::string &target_name_lower)
 {
 	std::string port_lower = str_tolower(port_name);
 	return port_lower == target_name_lower || port_name == target_name ||
