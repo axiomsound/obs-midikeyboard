@@ -1,3 +1,2 @@
 #!/usr/bin/env zsh
-builtin cd -q "$(dirname "$0")"
-. .run-format.zsh
+source "${0:A:h}/.run-format.zsh"
