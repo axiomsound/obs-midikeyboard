@@ -10,6 +10,7 @@
 !/img
 !/installer
 !/src
+!/tests
 !/.clang-format
 !/.gersemirc
 !.gitignore

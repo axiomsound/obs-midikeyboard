@@ -1,0 +1,29 @@
+name: MIDI and chord tests
+on:
+  push:
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - '.github/workflows/chord-tests.yaml'
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - '.github/workflows/chord-tests.yaml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  core-tests:
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, windows-2022, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S tests -B build_tests
+      - name: Build
+        run: cmake --build build_tests --config Release --parallel
+      - name: Test
+        run: ctest --test-dir build_tests -C Release --output-on-failure

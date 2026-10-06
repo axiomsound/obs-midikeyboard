@@ -3,9 +3,9 @@
 ; Build: iscc /dBuildConfig=RelWithDebInfo setup.iss
 
 #define MyAppName "obs-midikeyboard"
-#define MyAppVersion "1.0.0"
-#define MyAppPublisher "obs-midikeyboard"
-#define MyAppURL "https://github.com/hack1exe/obs-midikeyboard"
+#define MyAppVersion "1.0.1"
+#define MyAppPublisher "axiomsound"
+#define MyAppURL "https://github.com/axiomsound/obs-midikeyboard"
 #ifndef BuildConfig
 #define BuildConfig "RelWithDebInfo"
 #endif

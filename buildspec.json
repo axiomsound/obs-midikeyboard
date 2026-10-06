@@ -33,13 +33,13 @@
     },
     "platformConfig": {
         "macos": {
-            "bundleId": "com.hack1exe.obs-midikeyboard"
+            "bundleId": "com.axiomsound.obs-midikeyboard"
         }
     },
     "name": "obs-midikeyboard",
     "displayName": "MIDI Piano Keyboard",
-    "version": "1.0.0",
-    "author": "hack1exe",
-    "website": "https://github.com/hack1exe/obs-midikeyboard",
-    "email": ""
+    "version": "1.0.1",
+    "author": "axiomsound",
+    "website": "https://github.com/axiomsound/obs-midikeyboard",
+    "email": "contact@axiomsound.dev"
 }

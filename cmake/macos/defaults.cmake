@@ -14,7 +14,9 @@ endif()
 
 include(xcode)
 
-include(buildspec)
+if(NOT USE_SYSTEM_LIBOBS)
+  include(buildspec)
+endif()
 
 # Use Applications directory as default install destination
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)

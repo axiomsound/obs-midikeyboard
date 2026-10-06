@@ -1,288 +1,181 @@
 #include "midi-input.h"
-#include <obs-module.h>
-#include <algorithm>
-#include <cctype>
-
-#ifdef _WIN32
-#include <windows.h>
-#endif
-
+#include "midi-device.h"
 #include "RtMidi.h"
 
-static std::string str_tolower(const std::string &s)
-{
-    std::string result = s;
-    std::transform(result.begin(), result.end(), result.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return result;
-}
+#include <obs-module.h>
+#include <algorithm>
+#include <chrono>
+#include <exception>
 
-MidiInput::MidiInput(const std::string &device_name)
-    : device_name_(device_name),
-      device_name_lower_(str_tolower(device_name))
+MidiInput::MidiInput(const std::string &device_name) : device_name_(device_name)
 {
+	worker_ = std::thread(&MidiInput::run, this);
 }
 
 MidiInput::~MidiInput()
 {
-    running_.store(false);
-    close();
+	running_.store(false);
+	wake_.notify_all();
+	if (worker_.joinable())
+		worker_.join();
 }
 
-bool MidiInput::open()
+void MidiInput::disconnect()
 {
-    if (is_open())
-        return true;
-
-    open_attempted_ = true;
-    last_reconnect_check_ = std::chrono::steady_clock::now();
-
-    try
-    {
-        auto *midi_in = new RtMidiIn(RtMidi::UNSPECIFIED, "OBS MIDI Keyboard");
-        unsigned int port_count = midi_in->getPortCount();
-
-        for (unsigned int i = 0; i < port_count; ++i)
-        {
-            std::string port_name = midi_in->getPortName(i);
-            if (str_tolower(port_name) == device_name_lower_ ||
-                port_name == device_name_)
-            {
-                midi_in->openPort(i, "OBS MIDI Keyboard");
-                midi_in->setCallback(&MidiInput::midi_callback, this);
-                midi_in->ignoreTypes(true, true, true);
-
-                midi_in_ = midi_in;
-                was_ever_open_ = true;
-                blog(LOG_INFO, "[MIDI Keyboard] Opened device: %s", port_name.c_str());
-                return true;
-            }
-        }
-
-        // Not found yet - try partial match
-        for (unsigned int i = 0; i < port_count; ++i)
-        {
-            std::string port_name = str_tolower(midi_in->getPortName(i));
-            if (port_name.find(device_name_lower_) != std::string::npos ||
-                device_name_lower_.find(port_name) != std::string::npos)
-            {
-                midi_in->openPort(i, "OBS MIDI Keyboard");
-                midi_in->setCallback(&MidiInput::midi_callback, this);
-                midi_in->ignoreTypes(true, true, true);
-
-                midi_in_ = midi_in;
-                was_ever_open_ = true;
-                blog(LOG_INFO, "[MIDI Keyboard] Opened device (partial match): %s",
-                     midi_in->getPortName(i).c_str());
-                return true;
-            }
-        }
-
-        delete midi_in;
-        blog(LOG_WARNING, "[MIDI Keyboard] Device '%s' not found among %d ports",
-             device_name_.c_str(), port_count);
-        return false;
-    }
-    catch (const RtMidiError &e)
-    {
-        blog(LOG_WARNING, "[MIDI Keyboard] Failed to open device '%s': %s",
-             device_name_.c_str(), e.what());
-        return false;
-    }
+	connected_.store(false);
+	if (midi_in_) {
+		// Stop the backend before removing its callback; never hold the note mutex here.
+		try {
+			midi_in_->closePort();
+			midi_in_->cancelCallback();
+		} catch (const std::exception &error) {
+			blog(LOG_WARNING, "[MIDI Keyboard] Closing '%s': %s", device_name_.c_str(), error.what());
+		}
+		midi_in_.reset();
+	}
+	connected_port_name_.clear();
+	std::lock_guard lock(state_mutex_);
+	state_.clear();
 }
 
-void MidiInput::close()
+void MidiInput::run()
 {
-    if (midi_in_)
-    {
-        try
-        {
-            auto *midi_in = static_cast<RtMidiIn *>(midi_in_);
-            if (midi_in->isPortOpen())
-            {
-                midi_in->cancelCallback();
-                midi_in->closePort();
-            }
-            delete midi_in;
-        }
-        catch (...)
-        {
-        }
-        midi_in_ = nullptr;
-    }
-    std::lock_guard<std::mutex> lock(mutex_);
-    active_notes_.clear();
+	auto last_warning = std::chrono::steady_clock::time_point{};
+	while (running_.load()) {
+		try {
+			if (!midi_in_) {
+				midi_in_ = std::make_unique<RtMidiIn>(RtMidi::UNSPECIFIED, "OBS MIDI Keyboard");
+				midi_in_->ignoreTypes(true, true, true);
+				midi_in_->setCallback(&MidiInput::midi_callback, this);
+			}
+			std::vector<std::string> ports;
+			const auto count = midi_in_->getPortCount();
+			ports.reserve(count);
+			for (unsigned int port = 0; port < count; ++port)
+				ports.push_back(midi_in_->getPortName(port));
+
+			// WinMM's isPortOpen() alone does not detect unplugging a device.
+			if (connected_.load() && (!midi_in_->isPortOpen() ||
+						  std::count(ports.begin(), ports.end(), connected_port_name_) != 1)) {
+				blog(LOG_INFO, "[MIDI Keyboard] Disconnected: %s", device_name_.c_str());
+				disconnect();
+			}
+			if (!connected_.load() && midi_in_) {
+				const auto port = select_midi_port(ports, device_name_,
+								   midi_in_->getCurrentApi() == RtMidi::WINDOWS_MM);
+				if (port) {
+					midi_in_->openPort(*port, "OBS MIDI Keyboard");
+					if (midi_in_->isPortOpen()) {
+						connected_port_name_ = ports[*port];
+						connected_.store(true);
+						blog(LOG_INFO, "[MIDI Keyboard] Connected: %s",
+						     connected_port_name_.c_str());
+					}
+				}
+			}
+		} catch (const std::exception &error) {
+			const auto now = std::chrono::steady_clock::now();
+			if (now - last_warning >= std::chrono::seconds(10)) {
+				blog(LOG_WARNING, "[MIDI Keyboard] Device '%s': %s", device_name_.c_str(),
+				     error.what());
+				last_warning = now;
+			}
+			disconnect();
+		}
+		std::unique_lock lock(wait_mutex_);
+		wake_.wait_for(lock, std::chrono::seconds(1), [this] { return !running_.load(); });
+	}
+	disconnect();
 }
 
-bool MidiInput::is_open() const
+MidiSnapshot MidiInput::snapshot(int channel, bool include_sustain) const
 {
-    if (!midi_in_)
-        return false;
-    try
-    {
-        return static_cast<RtMidiIn *>(midi_in_)->isPortOpen();
-    }
-    catch (...)
-    {
-        return false;
-    }
-}
-
-void MidiInput::check_reconnect()
-{
-    auto now = std::chrono::steady_clock::now();
-
-    // Rate-limit reconnect checks to once per second
-    if (now - last_reconnect_check_ < std::chrono::seconds(1))
-        return;
-
-    last_reconnect_check_ = now;
-
-    if (is_open())
-        return;
-
-    // Try to reconnect
-    blog(LOG_INFO, "[MIDI Keyboard] Attempting reconnect to '%s'...",
-         device_name_.c_str());
-
-    try
-    {
-        auto *midi_in = new RtMidiIn(RtMidi::UNSPECIFIED, "OBS MIDI Keyboard");
-        unsigned int port_count = midi_in->getPortCount();
-
-        std::string target = str_tolower(device_name_);
-        for (unsigned int i = 0; i < port_count; ++i)
-        {
-            std::string port_name = midi_in->getPortName(i);
-            std::string port_lower = str_tolower(port_name);
-
-            if (port_lower == target ||
-                port_name == device_name_ ||
-                port_lower.find(target) != std::string::npos ||
-                target.find(port_lower) != std::string::npos)
-            {
-                midi_in->openPort(i, "OBS MIDI Keyboard");
-                midi_in->setCallback(&MidiInput::midi_callback, this);
-                midi_in->ignoreTypes(true, true, true);
-
-                // Clean up old state
-                {
-                    std::lock_guard<std::mutex> lock(mutex_);
-                    active_notes_.clear();
-                }
-
-                if (midi_in_)
-                {
-                    try
-                    {
-                        auto *old = static_cast<RtMidiIn *>(midi_in_);
-                        old->cancelCallback();
-                        old->closePort();
-                        delete old;
-                    }
-                    catch (...)
-                    {
-                    }
-                }
-
-                midi_in_ = midi_in;
-                was_ever_open_ = true;
-                blog(LOG_INFO, "[MIDI Keyboard] Reconnected to: %s",
-                     port_name.c_str());
-                return;
-            }
-        }
-
-        delete midi_in;
-    }
-    catch (const RtMidiError &e)
-    {
-        blog(LOG_WARNING, "[MIDI Keyboard] Reconnect attempt failed: %s",
-             e.what());
-    }
+	std::lock_guard lock(state_mutex_);
+	return state_.snapshot(channel, include_sustain);
 }
 
 std::map<int, uint8_t> MidiInput::get_active_notes() const
 {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return active_notes_;
+	std::map<int, uint8_t> result;
+	for (const auto &note : snapshot().notes)
+		result[note.note] = std::max(result[note.note], note.velocity);
+	return result;
 }
 
-void MidiInput::midi_callback(double /*time*/,
-                              std::vector<unsigned char> *msg,
-                              void *user_data)
+void MidiInput::midi_callback(double, std::vector<unsigned char> *message, void *user_data) noexcept
 {
-    if (!msg || msg->empty() || !user_data)
-        return;
-    auto *self = static_cast<MidiInput *>(user_data);
-    if (!self->running_.load())
-        return;
-    self->handle_message(*msg);
-}
-
-void MidiInput::handle_message(const std::vector<unsigned char> &msg)
-{
-    uint8_t status = msg[0] & 0xF0;
-    uint8_t note = (msg.size() > 1) ? msg[1] : 0;
-    uint8_t velocity = (msg.size() > 2) ? msg[2] : 0;
-
-    if (status == 0x90 && velocity > 0)
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        active_notes_[note] = velocity;
-    }
-    else if (status == 0x80 || (status == 0x90 && velocity == 0))
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        active_notes_.erase(note);
-    }
-
-    last_message_time_ = std::chrono::steady_clock::now();
+	if (!message || !user_data)
+		return;
+	auto *self = static_cast<MidiInput *>(user_data);
+	if (!self->running_.load())
+		return;
+	try {
+		const auto now = std::chrono::steady_clock::now().time_since_epoch();
+		const auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
+		std::lock_guard lock(self->state_mutex_);
+		self->state_.handle_message(*message, static_cast<uint64_t>(milliseconds));
+	} catch (...) {
+		// Exceptions must not escape into the native MIDI callback.
+	}
 }
 
 MidiManager &MidiManager::instance()
 {
-    static MidiManager mgr;
-    return mgr;
+	static MidiManager manager;
+	return manager;
 }
 
 std::shared_ptr<MidiInput> MidiManager::get_input(const std::string &device_name)
 {
-    if (device_name.empty())
-        return nullptr;
-
-    std::lock_guard<std::mutex> lock(mutex_);
-
-    auto it = inputs_.find(device_name);
-    if (it != inputs_.end())
-    {
-        auto input = it->second.lock();
-        if (input)
-            return input;
-        inputs_.erase(it);
-    }
-
-    auto input = std::make_shared<MidiInput>(device_name);
-    inputs_[device_name] = input;
-    return input;
+	if (device_name.empty())
+		return nullptr;
+	std::unique_lock lock(mutex_);
+	const auto key = midi_device_key(device_name);
+	auto &entry = inputs_[key];
+	if (auto input = entry.lock())
+		return input;
+	// A saved WinMM name can retain an old port index after reconnecting.
+	// Resolve new aliases once, outside rendering, and share the existing owner.
+	lock.unlock();
+	const auto ports = list_devices();
+	lock.lock();
+	if (auto input = entry.lock())
+		return input;
+#ifdef _WIN32
+	constexpr bool winmm_names = true;
+#else
+	constexpr bool winmm_names = false;
+#endif
+	const auto selected = select_midi_port(ports, device_name, winmm_names);
+	if (selected) {
+		for (const auto &[other_key, other_entry] : inputs_) {
+			if (auto input = other_entry.lock();
+			    input && select_midi_port(ports, input->device_name(), winmm_names) == selected) {
+				entry = input;
+				return input;
+			}
+		}
+	}
+	try {
+		auto input = std::make_shared<MidiInput>(device_name);
+		entry = input;
+		return input;
+	} catch (const std::exception &error) {
+		blog(LOG_ERROR, "[MIDI Keyboard] Cannot start '%s': %s", device_name.c_str(), error.what());
+		return nullptr;
+	}
 }
 
 std::vector<std::string> MidiManager::list_devices()
 {
-    std::vector<std::string> devices;
-    try
-    {
-        RtMidiIn midi_in(RtMidi::UNSPECIFIED, "OBS MIDI Keyboard Enum");
-        unsigned int count = midi_in.getPortCount();
-        for (unsigned int i = 0; i < count; ++i)
-        {
-            devices.push_back(midi_in.getPortName(i));
-        }
-    }
-    catch (const RtMidiError &e)
-    {
-        blog(LOG_WARNING, "[MIDI Keyboard] Error enumerating devices: %s",
-             e.what());
-    }
-    return devices;
+	std::vector<std::string> devices;
+	try {
+		RtMidiIn midi_in(RtMidi::UNSPECIFIED, "OBS MIDI Keyboard Enum");
+		const auto count = midi_in.getPortCount();
+		for (unsigned int port = 0; port < count; ++port)
+			devices.push_back(midi_in.getPortName(port));
+	} catch (const std::exception &error) {
+		blog(LOG_WARNING, "[MIDI Keyboard] Enumerating devices: %s", error.what());
+	}
+	return devices;
 }

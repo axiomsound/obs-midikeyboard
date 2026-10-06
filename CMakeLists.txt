@@ -6,6 +6,7 @@ project(${_name} VERSION ${_version})
 
 option(ENABLE_FRONTEND_API "Use obs-frontend-api for UI functionality" OFF)
 option(ENABLE_QT "Use Qt functionality" OFF)
+option(USE_SYSTEM_LIBOBS "Use an installed libobs SDK instead of bootstrapping OBS dependencies" OFF)
 
 include(compilerconfig)
 include(defaults)
@@ -16,39 +17,51 @@ add_library(${CMAKE_PROJECT_NAME} MODULE)
 find_package(libobs REQUIRED)
 target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE OBS::libobs)
 
-target_sources(${CMAKE_PROJECT_NAME} PRIVATE
+target_sources(
+  ${CMAKE_PROJECT_NAME}
+  PRIVATE
     src/plugin-main.cpp
     src/plugin-support.c.in
     src/piano-source.cpp
+    src/piano-layout.cpp
     src/midi-input.cpp
+    src/midi-state.cpp
+    src/midi-device.cpp
+    src/chord-detector.cpp
+    src/chord-source.cpp
     extern/rtmidi/RtMidi.cpp
 )
 
-target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
-    extern/rtmidi
-)
+target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE extern/rtmidi)
 
 if(WIN32)
-    target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE winmm)
-    target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE __WINDOWS_MM__)
+  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE winmm)
+  target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE __WINDOWS_MM__)
 endif()
 
 if(APPLE)
-    target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE "-framework CoreMIDI" "-framework CoreFoundation")
-    target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE __MACOSX_CORE__)
+  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE "-framework CoreMIDI" "-framework CoreFoundation")
+  target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE __MACOSX_CORE__)
 endif()
 
 if(UNIX AND NOT APPLE)
-    find_package(ALSA REQUIRED)
-    target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE ALSA::ALSA)
-    target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE __LINUX_ALSA__)
+  find_package(ALSA REQUIRED)
+  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE ALSA::ALSA)
+  target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE __LINUX_ALSA__)
 endif()
 
-target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
-    _CRT_SECURE_NO_WARNINGS
-)
+target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE _CRT_SECURE_NO_WARNINGS)
 
 target_compile_features(${CMAKE_PROJECT_NAME} PRIVATE cxx_std_20)
+
+find_package(Threads REQUIRED)
+target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE Threads::Threads)
+
+option(BUILD_TESTING "Build MIDI, chord recognition, and keyboard geometry tests" OFF)
+if(BUILD_TESTING)
+  enable_testing()
+  add_subdirectory(tests)
+endif()
 
 if(ENABLE_FRONTEND_API)
   find_package(obs-frontend-api REQUIRED)
@@ -73,11 +86,12 @@ set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME ${_nam
 # Inno Setup installer (for local builds)
 find_program(ISCC iscc)
 if(ISCC)
-    add_custom_target(installer
-        COMMAND "${ISCC}" "/dBuildConfig=$<CONFIG>" "${CMAKE_CURRENT_SOURCE_DIR}/installer/setup.iss"
-        BYPRODUCTS "${CMAKE_CURRENT_BINARY_DIR}/installer/obs-midikeyboard-${PROJECT_VERSION}-windows-x64.exe"
-        COMMENT "Building Inno Setup installer..."
-        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/installer"
-    )
-    add_dependencies(installer ${CMAKE_PROJECT_NAME})
+  add_custom_target(
+    installer
+    COMMAND "${ISCC}" "/dBuildConfig=$<CONFIG>" "${CMAKE_CURRENT_SOURCE_DIR}/installer/setup.iss"
+    BYPRODUCTS "${CMAKE_CURRENT_BINARY_DIR}/installer/obs-midikeyboard-${PROJECT_VERSION}-windows-x64.exe"
+    COMMENT "Building Inno Setup installer..."
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/installer"
+  )
+  add_dependencies(installer ${CMAKE_PROJECT_NAME})
 endif()
