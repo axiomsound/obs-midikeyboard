@@ -19,7 +19,7 @@ OBS Studio plugin that turns your MIDI controller into a live on-screen piano ke
 
 ## Quick start
 
-1. Download the latest installer from [Releases](https://github.com/hack1exe/obs-midikeyboard/releases)
+1. Download the latest installer from [Releases](https://github.com/axiomsound/obs-midikeyboard/releases)
 2. Run the installer — it auto-detects your OBS installation
 3. Launch OBS Studio
 4. Add a new source → **MIDI Piano Keyboard**
@@ -93,6 +93,7 @@ The built plugin lands in `build_x64\rundir\RelWithDebInfo\`.
 To build the installer:
 
 ```powershell
+cmake --install build_x64 --config RelWithDebInfo --prefix release/RelWithDebInfo
 cmake --build --preset windows-x64 --target installer
 ```
 
@@ -139,7 +140,8 @@ Physical MIDI delivery and USB unplug/replug still require a manual OBS check.
 
 
 
-GitHub Actions builds for Windows (`.exe` + `.zip`). The installer is signed with SHA256 checksums.
+GitHub Actions packages Windows builds as `.exe` and `.zip`. Releases include
+SHA256 checksums for integrity verification.
 
 ## Changelog
 

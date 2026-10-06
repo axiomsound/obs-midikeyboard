@@ -40,7 +40,10 @@ if(WIN32)
 endif()
 
 if(APPLE)
-  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE "-framework CoreMIDI" "-framework CoreFoundation")
+  target_link_libraries(
+    ${CMAKE_PROJECT_NAME}
+    PRIVATE "-framework CoreMIDI" "-framework CoreAudio" "-framework CoreFoundation"
+  )
   target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE __MACOSX_CORE__)
 endif()
 
